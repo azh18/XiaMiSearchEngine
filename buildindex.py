@@ -6,6 +6,22 @@
 import re
 import math
 import json
+import jieba
+import pickle
+import pymysql
+
+db_ip = 'localhost'
+db_ip = '202.120.37.78'
+db_user = 'admin'
+db_pwd = '2016_NRL_admin123'
+db_database = 'Xiami'
+# db_sock = '/home/mysql/mysql.sock'
+db_sock = '/var/lib/mysql/mysql.sock'
+db = pymysql.connect(host=db_ip, user=db_user, passwd=db_pwd,
+                     db=db_database, unix_socket=db_sock, port=10002, charset="utf8")
+cursor = db.cursor()
+
+
 
 def isChineseLyric(str):
     # if re.match('[ \u4e00 -\u9fa5]+', str) != None:
@@ -53,6 +69,7 @@ def word_split_out(text):
     return word_list
 
 
+
 class BuildIndex:
 
 
@@ -61,19 +78,25 @@ class BuildIndex:
         self.df = {}
         self.idf = {}
 
+        # store linked information (belonging...)
         self.singers = []
         self.albums = []
         self.songs = []
+        # the number of singers, albums, ...
         self.singersSize = 0
         self.albumsSize = 0
         self.songsSize = 0
+        # store map (songID ---> songIdx)
         self.songIDTable = {}
         self.albumIDTable = {}
         self.singerIDTable = {}
+        # store posting list (str ---> Idx)
         self.singerIndex = {}
         self.albumIndex = {}
         self.songIndex = {}
         self.lyricIndex = {}
+        # the biggest popular number in db
+        self.biggestPopular = 0
 
         self.filenames = files
         self.file_to_terms = self.process_files()
@@ -85,21 +108,40 @@ class BuildIndex:
 
 
     def process_files(self):
-
         singerFileName = self.filenames[0]
         cntSinger = 0
         for line in open(singerFileName, 'r', encoding='utf-8'):
             singerItem = json.loads(line)
+            # store singer into database
+            try:
+                sql = "insert into singers(artistIdx, artistName,artistID," \
+                      "artistFansNum,artistCommentNum,artistPict)" \
+                      "values('%d','%s','%s','%d','%d','%s')" % \
+                      (cntSinger, singerItem["artistName"][0], singerItem["artistID"],\
+                        int(singerItem["artistFansNum"]), \
+                       int(singerItem["artistCommentNum"]), singerItem["artistPict"])
+                cursor.execute(sql)
+
+            except:
+                print("error in singer import")
+
             # process singer
             singerID = singerItem["artistID"]
             self.singerIDTable[singerID] = cntSinger
-
-            singerItem["albumsIdx"] = []
-            singerItem["songsIdx"] = []
-            self.singers.append(singerItem)
+            singerLink = {}
+            singerLink["albumsIdx"] = []
+            singerLink["songsIdx"] = []
+            self.singers.append(singerLink)
             singerName = singerItem['artistName'][0]
-            singerWordBox = word_split_out(singerName)
-            for item in singerWordBox:
+            singerWordBoxRaw = word_split_out(singerName)
+            # singerWordBox = jieba.cut_for_search(singerName)
+            # for item in singerWordBox:
+            #     if item in self.singerIndex.keys():
+            #         self.singerIndex[item].append(cntSinger)
+            #     else:
+            #         self.singerIndex[item] = [cntSinger]
+
+            for item in singerWordBoxRaw:
                 if isChinese(item[0]):
                     for char in item:
                         if char in self.singerIndex.keys():
@@ -113,24 +155,46 @@ class BuildIndex:
                         self.singerIndex[item] = [cntSinger]
             cntSinger += 1
         self.singersSize = cntSinger
+        db.commit()
 
         albumFileName = self.filenames[1]
         cntAlbum = 0
         for line in open(albumFileName, 'r', encoding='utf-8'):
             albumItem = json.loads(line)
+            # store album into database
+            try:
+                sql = "insert into albums(albumIdx, albumName,albumID,artistName,artistID,albumListen," \
+                      "albumFansNum,albumCommentNum,albumPict)"\
+                      "values('%d','%s','%s','%s','%s','%d','%d','%d','%s')" % \
+                      (cntAlbum, albumItem["albumName"].replace("\'", "\'\'"), albumItem["albumID"], albumItem["artistName"][0], albumItem["artistID"],\
+                       int(albumItem["albumListen"]), int(albumItem["albumFansNum"]), \
+                       int(albumItem["albumCommentNum"]), albumItem["albumPict"])
+                cursor.execute(sql)
+
+            except:
+                print("error in sql")
+
+            albumLink = {}
             albumBelongsToSingerID = albumItem["artistID"]
             if albumBelongsToSingerID in self.singerIDTable.keys():
-                albumItem["singerIdx"] = self.singerIDTable[albumBelongsToSingerID]
-                print(self.singers[albumItem["singerIdx"]])
-                self.singers[albumItem["singerIdx"]]["albumsIdx"].append(cntAlbum)
+                albumLink["singerIdx"] = self.singerIDTable[albumBelongsToSingerID]
+                # print(self.singers[albumItem["singerIdx"]])
+                self.singers[albumLink["singerIdx"]]["albumsIdx"].append(cntAlbum)
             # process songs
-            albumItem["songsIdx"] = []
+            albumLink["songsIdx"] = []
             # process album
             albumID = albumItem["albumID"]
             self.albumIDTable[albumID] = cntAlbum
 
-            self.albums.append(albumItem)
+            self.albums.append(albumLink)
             albumName = albumItem['albumName']
+
+            # albumWordBox = jieba.cut_for_search(albumName)
+            # for item in albumWordBox:
+            #     if item in self.albumIndex.keys():
+            #         self.albumIndex[item].append(cntAlbum)
+            #     else:
+            #         self.albumIndex[item] = [cntAlbum]
 
             albumWordBox = word_split_out(albumName)
             for item in albumWordBox:
@@ -147,6 +211,7 @@ class BuildIndex:
                         self.albumIndex[item] = [cntAlbum]
             cntAlbum += 1
         self.albumsSize = cntAlbum
+        db.commit()
 
 
 
@@ -155,36 +220,83 @@ class BuildIndex:
         cntSong = 0
         for line in open(songFileName, 'r', encoding='utf-8'):
             songItem = json.loads(line)
+            # store songs into database
+            try:
+                sql = "insert into songs(songIdx, songName,songID,songLyric,songAlbum,songAlbumID,songSinger,\
+                songSingerID,songShareNum,songCommentNum,songRealID)"\
+                      "values('%d','%s','%s','%s','%s','%s','%s','%s','%d','%d','%s')" % \
+                      (cntSong, songItem["songName"].replace("\'", "\'\'"), songItem["songID"], \
+                       songItem["songLyric"].replace("\'", ""), songItem["songAlbum"].replace("\'", "\'\'"),\
+                       songItem["songAlbumID"], songItem["songSinger"][0].replace("\'", ""), songItem["songSingerID"][0],\
+                        int(songItem["songShareNum"]), int(songItem["songCommentNum"]),\
+                       songItem["songRealID"])
+                cursor.execute(sql)
+
+            except:
+                print("error")
+
+            songLink = {}
+            rating = int(songItem["songCommentNum"]) + int(songItem["songShareNum"])
+            if rating > self.biggestPopular:
+                self.biggestPopular = rating
             songBelongToAlbumID = songItem["songAlbumID"]
             if songBelongToAlbumID in self.albumIDTable.keys():
-                songItem["albumIdx"] = self.albumIDTable[songBelongToAlbumID]
-                self.albums[songItem["albumIdx"]]["songsIdx"].append(cntSong)
+                songLink["albumIdx"] = self.albumIDTable[songBelongToAlbumID]
+                self.albums[songLink["albumIdx"]]["songsIdx"].append(cntSong)
             songBelongToSingerID = songItem["songSingerID"][0]
             if songBelongToSingerID in self.singerIDTable.keys():
-                songItem["singerIdx"] = self.singerIDTable[songBelongToSingerID]
-                self.singers[songItem["singerIdx"]]["songsIdx"].append(cntSong)
+                songLink["singerIdx"] = self.singerIDTable[songBelongToSingerID]
+                self.singers[songLink["singerIdx"]]["songsIdx"].append(cntSong)
 
-            self.songs.append(songItem)
+            self.songs.append(songLink)
             songName = songItem['songName']
             songID = songItem['songID']
             songLyric = songItem['songLyric']
             self.songIDTable[songID] = cntSong
             # process lyric
+            # lyricWordBox = jieba.cut_for_search(songLyric, HMM=False)
+            # for item in lyricWordBox:
+            #     if item in self.lyricIndex.keys():
+            #         self.lyricIndex[item].append(cntSong)
+            #     else:
+            #         self.lyricIndex[item] = [cntSong]
+            # posting list with positions
             lyricWordBox = word_split_out(songLyric)
+            position = 0
             for item in lyricWordBox:
                 if isChinese(item[0]):
                     for char in item:
                         if char in self.lyricIndex.keys():
-                            self.lyricIndex[char].append(cntSong)
+                            if cntSong in self.lyricIndex[char].keys():
+                                self.lyricIndex[char][cntSong].append(position)
+                                # self.lyricIndex[char][cntSong] = position
+                            else:
+                                self.lyricIndex[char][cntSong] = [position]
+                                # self.lyricIndex[char] = {cntSong: position}
                         else:
-                            self.lyricIndex[char] = [cntSong]
+                            self.lyricIndex[char] = {}
+                            self.lyricIndex[char][cntSong] = [position]
+                        position += 1
+
                 elif isEnglish(item[0]):
                     if item in self.lyricIndex.keys():
-                        self.lyricIndex[item].append(cntSong)
+                        if cntSong in self.lyricIndex.keys():
+                            self.lyricIndex[item][cntSong].append(position)
+                        else:
+                            self.lyricIndex[item][cntSong] = [position]
                     else:
-                        self.lyricIndex[item] = [cntSong]
+                        self.lyricIndex[item] = {}
+                        self.lyricIndex[item][cntSong] = [position]
+                    position += 1
 
             # process songName
+            # songWordBox = jieba.cut_for_search(songName)
+            # for item in songWordBox:
+            #     if item in self.songIndex.keys():
+            #         self.songIndex[item].append(cntSong)
+            #     else:
+            #         self.songIndex[item] = [cntSong]
+
             songWordBox = word_split_out(songName)
             for item in songWordBox:
                 if isChinese(item[0]):
@@ -199,14 +311,19 @@ class BuildIndex:
                     else:
                         self.songIndex[item] = [cntSong]
             cntSong += 1
-
-
-
+        db.commit()
         self.songsSize = cntSong
 
         ccc =4
         ccc =5
 
+    def serialize(self, fileName):
+        pickle.dump(self, open(fileName, 'wb'))
+
+    def deserialize(self, fileName):
+        return pickle.load(open(fileName, 'rb'))
+
 if __name__ == "__main__":
     # print(isChinese("你"))
     index = BuildIndex(["artistJ.json", "albumJ.json", "songJ.json"])
+    index.serialize("index.data")
