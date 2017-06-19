@@ -8,6 +8,8 @@ class Query:
         self.filenames = filenames
         self.index = buildindex.BuildIndex
         self.index = buildindex.BuildIndex.deserialize(self.index, filenames)
+        self.singerPrefer = {}
+        self.songPrefer = {}
         # self.index = buildindex.BuildIndex(self.filenames)
 
     def getSingerFromDB(self, singerIdx):
@@ -197,6 +199,8 @@ class Query:
     def freeQuery(self, keywords):
         # keywordList1 = jieba.cut_for_search(keywords)
         keywordList2 = buildindex.word_split_out(keywords)
+        if len(keywordList2)>=2:
+            self.lyricQuery(keywords)
         singerList = self.singerQuery(keywords, True)
         # for item in keywordList2:
         #     if len(singerList):
@@ -240,7 +244,8 @@ class Query:
 if __name__ == "__main__":
     # q = Query(["artistJ.json", "albumJ.json", "songJ.json"])
     q = Query("index.data")
-    q.lyricQuery("take em straight")
-    # q.singerQuery("徐佳莹")
+    # q.lyricQuery("take em straight")
+    q.singerQuery("徐佳莹", True)
+    q.freeQuery("失落沙洲")
     # q.songQuery("Love")
-    # q.freeQuery("徐佳莹")
+    # q.freeQuery("安静")

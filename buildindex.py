@@ -111,7 +111,10 @@ class BuildIndex:
         singerFileName = self.filenames[0]
         cntSinger = 0
         for line in open(singerFileName, 'r', encoding='utf-8'):
-            singerItem = json.loads(line)
+            try:
+                singerItem = json.loads(line)
+            except:
+                continue
             # store singer into database
             try:
                 sql = "insert into singers(artistIdx, artistName,artistID," \
@@ -160,7 +163,10 @@ class BuildIndex:
         albumFileName = self.filenames[1]
         cntAlbum = 0
         for line in open(albumFileName, 'r', encoding='utf-8'):
-            albumItem = json.loads(line)
+            try:
+                albumItem = json.loads(line)
+            except:
+                continue
             # store album into database
             try:
                 sql = "insert into albums(albumIdx, albumName,albumID,artistName,artistID,albumListen," \
@@ -219,7 +225,10 @@ class BuildIndex:
         songFileName = self.filenames[2]
         cntSong = 0
         for line in open(songFileName, 'r', encoding='utf-8'):
-            songItem = json.loads(line)
+            try:
+                songItem = json.loads(line)
+            except:
+                continue
             # store songs into database
             try:
                 sql = "insert into songs(songIdx, songName,songID,songLyric,songAlbum,songAlbumID,songSinger,\
