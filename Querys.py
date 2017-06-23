@@ -6,10 +6,19 @@ from buildindex import BuildIndex
 class Query:
     def __init__(self, filenames):
         self.filenames = filenames
-        self.index = buildindex.BuildIndex
-        self.index = buildindex.BuildIndex.deserialize(self.index, filenames)
+        self.index = buildindex.BuildIndex("index.data")
+        # self.index = buildindex.BuildIndex.deserialize(self.index, filenames)
+        self.index = self.index.deserialize("index.data")
+        # {songIdx:click times}
+        # 直接用频数的缺点：
+        # 1、点的次数多了以后，由于频数都很高，导致方法退化为只看点击次数
+        # 因此修改为用频率，但如果直接用频率：
+        # 一开始点一下百分比就100%，不合理
+        # 因此一开始所有歌曲频率都设置为1，这样就点好几次同一首歌才可以出现偏好
         self.singerPrefer = {}
         self.songPrefer = {}
+        self.songPreferTotal = 10 # songPrefer之和
+        self.singerPreferTotal = 10 # singerPrefer之和
         # self.index = buildindex.BuildIndex(self.filenames)
 
     def getSingerFromDB(self, singerIdx):
@@ -67,7 +76,13 @@ class Query:
         song["songRealID"] = result[10]
         return song
 
-
+    def getSingerIdxFromSongIdx(self, songIdx):
+        songItem = self.getSongsFromDB(songIdx)
+        singerID = songItem["songSingerID"]
+        if singerID in self.index.singerIDTable:
+            return self.index.singerIDTable[singerID]
+        else:
+            return -1
 
     def songQuery(self, keywords):
         songsImmidiate = []
@@ -191,17 +206,79 @@ class Query:
                         set(self.index.lyricIndex[item])))
                 else:
                     songsImmidiate = self.index.lyricIndex[item]
+        ratingSongs = {}
         for item in songsImmidiate:
-            songInfo = self.getSongsFromDB(item)
-            print(songInfo)
-        return songsImmidiate
+            songItem = self.getSongsFromDB(item)
+            ratingSongs[item] = (int(songItem["songCommentNum"]) +
+                                 int(songItem["songShareNum"])) / self.index.biggestPopular * 45
+            if songItem["songName"] == keywords:
+                ratingSongs[item] += 10
+            else:
+                ratingSongs[item] += 1
+            # preference on this song
+            if item in self.songPrefer.keys():
+                ratingSongs[item] += self.songPrefer[item] * 2
+
+                # preference on this singer
+                # if self.index.singerIDTable[songItem["songSingerID"]] in self.singerPrefer.keys():
+                #    ratingSongs[item] += self.singerPrefer[self.index.singerIDTable[songItem["songSingerID"]]]
+        ratingSongs = sorted(ratingSongs.items(), key=lambda item:item[1], reverse=True)
+        cnt = 0
+        returnSongList = []
+        for i in ratingSongs:
+            songItem = self.getSongsFromDB(i[0])
+            returnSongList.append(songItem)
+            print(songItem['songName'])
+            cnt += 1
+            if cnt > 15:
+                break
+        return returnSongList
+
+    def singerQueryForSongs(self, keywords):
+        singerList = self.singerQuery(keywords, True)
+        if len(singerList):
+            ratingSongs = {}
+            songTemp = self.index.singers[singerList[0]]["songsIdx"]
+            if len(songTemp):
+                for item in songTemp:
+                    songItem = self.getSongsFromDB(item)
+                    ratingSongs[item] = (int(songItem["songCommentNum"]) +
+                                   int(songItem["songShareNum"]))/self.index.biggestPopular*45
+                    if songItem["songName"] == keywords:
+                        ratingSongs[item] += 10
+                    else:
+                        ratingSongs[item] += 1
+                    # preference on this song
+                    if item in self.songPrefer.keys():
+                        ratingSongs[item] += self.songPrefer[item] * 2 / self.songPreferTotal
+
+                    # preference on this singer
+                    singerIdx = self.getSingerIdxFromSongIdx(item)
+                    if singerIdx in self.singerPrefer.keys():
+                       ratingSongs[item] += self.singerPrefer[singerIdx] / self.singerPreferTotal
+
+            ratingSongs = sorted(ratingSongs.items(), key=lambda item:item[1], reverse=True)
+            cnt = 0
+            returnSongList = []
+            for i in ratingSongs:
+                songItem = self.getSongsFromDB(i[0])
+                returnSongList.append(songItem)
+                print(songItem['songName'])
+                cnt += 1
+                if cnt > 15:
+                    break
+            return returnSongList
+        else:
+            return []
+
+
 
     def freeQuery(self, keywords):
         # keywordList1 = jieba.cut_for_search(keywords)
         keywordList2 = buildindex.word_split_out(keywords)
         if len(keywordList2)>=2:
             self.lyricQuery(keywords)
-        singerList = self.singerQuery(keywords, True)
+        singerList = self.singerQuery(keywords, False)
         # for item in keywordList2:
         #     if len(singerList):
         #         singerList = list(set(singerList).intersection(
@@ -220,10 +297,26 @@ class Query:
                         ratingSongs[item] += 10
                     else:
                         ratingSongs[item] += 1
+                    # preference on this song
+                    if item in self.songPrefer.keys():
+                        ratingSongs[item] += self.songPrefer[item] * 2 / self.songPreferTotal
+
+                    # preference on this singer
+                    singerIdx = self.getSingerIdxFromSongIdx(item)
+                    if singerIdx in self.singerPrefer.keys():
+                       ratingSongs[item] += self.singerPrefer[singerIdx] / self.singerPreferTotal
+
             ratingSongs = sorted(ratingSongs.items(), key=lambda item:item[1], reverse=True)
+            cnt = 0
+            returnSongList = []
             for i in ratingSongs:
                 songItem = self.getSongsFromDB(i[0])
+                returnSongList.append(songItem)
                 print(songItem['songName'])
+                cnt += 1
+                if cnt > 15:
+                    break
+            return returnSongList
         else:
             ratingSongs = {}
             songTemp = self.songQuery(keywords)
@@ -236,16 +329,34 @@ class Query:
                         ratingSongs[item] += 10
                     else:
                         ratingSongs[item] += 1
+                    # preference on this song
+                    if item in self.songPrefer.keys():
+                        ratingSongs[item] += self.songPrefer[item] * 2
+
+                    # preference on this singer
+                    # if self.index.singerIDTable[songItem["songSingerID"]] in self.singerPrefer.keys():
+                    #    ratingSongs[item] += self.singerPrefer[self.index.singerIDTable[songItem["songSingerID"]]]
+
             ratingSongs = sorted(ratingSongs.items(), key=lambda item:item[1], reverse=True)
+            cnt = 0
+            returnSongList = []
             for i in ratingSongs:
                 songItem = self.getSongsFromDB(i[0])
+                returnSongList.append(songItem)
                 print(songItem['songName'])
+                cnt += 1
+                if cnt > 15:
+                    break
+            return returnSongList
 
 if __name__ == "__main__":
     # q = Query(["artistJ.json", "albumJ.json", "songJ.json"])
     q = Query("index.data")
-    # q.lyricQuery("take em straight")
-    q.singerQuery("徐佳莹", True)
-    q.freeQuery("失落沙洲")
+
+    # q.lyricQuery("走三关")
+    #q.singerQuery("徐佳莹", True)
+    # while(1):
+    #     keywords = input()
+    #     q.freeQuery(keywords)
     # q.songQuery("Love")
     # q.freeQuery("安静")

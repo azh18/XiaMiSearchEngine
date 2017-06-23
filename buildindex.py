@@ -8,17 +8,33 @@ import math
 import json
 import jieba
 import pickle
+# import dill as pickle
 import pymysql
+import hickle
+import ujson
+import dill
 
+
+
+# db_ip = '202.120.37.78'
+# db_user = 'admin'
+# db_pwd = '2016_NRL_admin123'
+# db_database = 'Xiami'
+# # db_sock = '/home/mysql/mysql.sock'
+# db_sock = '/var/lib/mysql/mysql.sock'
+# db = pymysql.connect(host=db_ip, user=db_user, passwd=db_pwd,
+#                      db=db_database, unix_socket=db_sock, port=10002, charset="utf8")
+
+
+# db_ip = 'localhost'
 db_ip = 'localhost'
-db_ip = '202.120.37.78'
-db_user = 'admin'
-db_pwd = '2016_NRL_admin123'
+db_user = 'root'
+db_pwd = '879034'
 db_database = 'Xiami'
 # db_sock = '/home/mysql/mysql.sock'
-db_sock = '/var/lib/mysql/mysql.sock'
+# db_sock = '/var/lib/mysql/mysql.sock'
 db = pymysql.connect(host=db_ip, user=db_user, passwd=db_pwd,
-                     db=db_database, unix_socket=db_sock, port=10002, charset="utf8")
+                     db=db_database, port=3306, charset="utf8")
 cursor = db.cursor()
 
 
@@ -99,7 +115,6 @@ class BuildIndex:
         self.biggestPopular = 0
 
         self.filenames = files
-        self.file_to_terms = self.process_files()
         # self.regdex = self.regIndex()
         # self.totalIndex = self.execute()
         # self.vectors = self.vectorize()
@@ -115,7 +130,7 @@ class BuildIndex:
                 singerItem = json.loads(line)
             except:
                 continue
-            # store singer into database
+            #store singer into database
             try:
                 sql = "insert into singers(artistIdx, artistName,artistID," \
                       "artistFansNum,artistCommentNum,artistPict)" \
@@ -125,8 +140,9 @@ class BuildIndex:
                        int(singerItem["artistCommentNum"]), singerItem["artistPict"])
                 cursor.execute(sql)
 
-            except:
-                print("error in singer import")
+            except Exception as e:
+                print(e)
+
 
             # process singer
             singerID = singerItem["artistID"]
@@ -177,8 +193,9 @@ class BuildIndex:
                        int(albumItem["albumCommentNum"]), albumItem["albumPict"])
                 cursor.execute(sql)
 
-            except:
-                print("error in sql")
+
+            except Exception as e:
+                print(e)
 
             albumLink = {}
             albumBelongsToSingerID = albumItem["artistID"]
@@ -229,20 +246,27 @@ class BuildIndex:
                 songItem = json.loads(line)
             except:
                 continue
+
+            # clean invalid song (artist is not in artistDB)
+            if len(songItem["songSingerID"]) == 0:
+                continue
+            elif songItem["songSingerID"][0] not in self.singerIDTable.keys():
+                continue
             # store songs into database
             try:
                 sql = "insert into songs(songIdx, songName,songID,songLyric,songAlbum,songAlbumID,songSinger,\
                 songSingerID,songShareNum,songCommentNum,songRealID)"\
                       "values('%d','%s','%s','%s','%s','%s','%s','%s','%d','%d','%s')" % \
-                      (cntSong, songItem["songName"].replace("\'", "\'\'"), songItem["songID"], \
-                       songItem["songLyric"].replace("\'", ""), songItem["songAlbum"].replace("\'", "\'\'"),\
-                       songItem["songAlbumID"], songItem["songSinger"][0].replace("\'", ""), songItem["songSingerID"][0],\
-                        int(songItem["songShareNum"]), int(songItem["songCommentNum"]),\
+                      (cntSong, songItem["songName"].replace("\'", "\'\'"), songItem["songID"],
+                       songItem["songLyric"].replace("\'", ""), songItem["songAlbum"].replace("\'", "\'\'"),
+                       songItem["songAlbumID"], songItem["songSinger"][0].replace("\'", "") if len(songItem["songSinger"]) else "",
+                       songItem["songSingerID"][0] if len(songItem["songSingerID"]) else "",
+                       int(songItem["songShareNum"]), int(songItem["songCommentNum"]),
                        songItem["songRealID"])
                 cursor.execute(sql)
 
-            except:
-                print("error")
+            except Exception as e:
+                print(e)
 
             songLink = {}
             rating = int(songItem["songCommentNum"]) + int(songItem["songShareNum"])
@@ -323,16 +347,46 @@ class BuildIndex:
         db.commit()
         self.songsSize = cntSong
 
+
+
         ccc =4
         ccc =5
 
     def serialize(self, fileName):
         pickle.dump(self, open(fileName, 'wb'))
+        # hickle.dump(self, fileName, mode='w')
+        # ujson.dump(self, open(fileName, 'w'))
+        # ujson.dump(self.singers, open("singers.data", 'w'))
+        # ujson.dump(self.albums, open("albums.data", 'w'))
+        # ujson.dump(self.songs, open("songs.data", 'w'))
+        # pickle.dump([self.singersSize, self.albumsSize, self.songsSize], open("singersSize.data", 'w'))
+        # ujson.dump(self.songIDTable, open("songIDTable.data", 'w'))
+        # ujson.dump(self.albumIDTable, open("albumIDTable.data", 'w'))
+        # ujson.dump(self.singerIDTable, open("singerIDTable.data", 'w'))
+        # ujson.dump(self.singerIndex, open("singerIndex.data", 'w'))
+        # ujson.dump(self.albumIndex, open("albumIndex.data", 'w'))
+        # ujson.dump(self.songIndex, open("songIndex.data", 'w'))
+        # ujson.dump(self.lyricIndex, open("lyricIndex.data", 'w'))
+
 
     def deserialize(self, fileName):
         return pickle.load(open(fileName, 'rb'))
+        # self.singers = ujson.load(open("singers.data", 'r'))
+        # self.albums = ujson.load(open("albums.data", 'r'))
+        # self.songs = ujson.load(open("songs.data", 'r'))
+        # self.singersSize = ujson.load(open("singersSize.data", 'r'))[0]
+        # self.albumsSize = ujson.load(open("singersSize.data", 'r'))[1]
+        # self.songsSize = ujson.load(open("singersSize.data", 'r'))[2]
+        # self.songIDTable = ujson.load(open("songIDTable.data", 'r'))
+        # self.albumIDTable = ujson.load(open("albumIDTable.data", 'r'))
+        # self.singerIDTable = ujson.load(open("singerIDTable.data", 'r'))
+        # self.singerIndex = ujson.load(open("singerIndex.data", 'r'))
+        # self.albumIndex = ujson.load(open("albumIndex.data", 'r'))
+        # self.songIndex = ujson.load(open("songIndex.data", 'r'))
+        # self.lyricIndex = ujson.load(open("lyricIndex.data", 'r'))
 
 if __name__ == "__main__":
     # print(isChinese("你"))
     index = BuildIndex(["artistJ.json", "albumJ.json", "songJ.json"])
+    index.process_files()
     index.serialize("index.data")
